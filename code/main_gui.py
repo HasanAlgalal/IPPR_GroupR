@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 from pipeline.plate_detect import detect_plate_info
 
@@ -34,7 +34,15 @@ class App:
         if not path:
             return
 
-        info = detect_plate_info(path)
+        try:
+            info = detect_plate_info(path)
+        except Exception as exc:
+            messagebox.showerror(
+                "Recognition failed",
+                "Could not process this image. Check your dependencies and, on first run, "
+                f"your internet connection for the EasyOCR model download.\n\n{exc}",
+            )
+            return
 
         self.log(f"Image: {os.path.basename(path)}")
         if not info.plate_text:

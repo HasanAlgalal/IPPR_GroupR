@@ -6,9 +6,8 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-import easyocr
 
-from pipeline.ocr_state import normalize_plate, get_prefix, get_state
+from pipeline.ocr_state import normalize_plate, get_prefix, get_state, get_vehicle_type
 
 
 # Accepts: WSP5591, PFQ5217, JHQ2945, JHW6236, JTJ1220, DV1, DDJ303, etc.
@@ -21,22 +20,16 @@ PLATE_RE = re.compile(
 )
 
 def vehicle_type_from_path(image_path: str) -> str:
-    p = image_path.replace("\\", "/").lower()
-    # folder-based type
-    if "/motorcycle/" in p:
-        return "Motorcycle"
-    if "/van/" in p:
-        return "Van"
-    if "/truck/" in p:
-        return "Truck"
-    if "/car/" in p:
-        return "Car"
-    return "Unknown"
+    return get_vehicle_type(image_path)
 
 def _imread_unicode(path: str):
-    data = np.fromfile(path, dtype=np.uint8)
-    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-    return img
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+        if data.size == 0:
+            return None
+        return cv2.imdecode(data, cv2.IMREAD_COLOR)
+    except (OSError, ValueError, cv2.error):
+        return None
 
 def _safe_resize(img, max_w=1600):
     h, w = img.shape[:2]
@@ -101,6 +94,8 @@ def _crop_expand(bgr, bbox, pad=0.15):
 def _easyocr_reader():
     # cached singleton
     if not hasattr(_easyocr_reader, "_r"):
+        import easyocr
+
         _easyocr_reader._r = easyocr.Reader(["en"], gpu=False)
     return _easyocr_reader._r
 

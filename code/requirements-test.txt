@@ -1,0 +1,3 @@
+# Deterministic tests do not initialize or download EasyOCR models.
+numpy==2.2.6
+opencv-python-headless==4.12.0.88

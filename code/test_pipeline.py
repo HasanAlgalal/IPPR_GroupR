@@ -1,84 +1,48 @@
-# D:\IPPR_GroupR\code\test_pipeline.py
+"""Batch demonstration runner for the active EasyOCR pipeline (not an accuracy benchmark)."""
+from __future__ import annotations
 
-import os
-import glob
-import cv2
-import shutil
-import pytesseract
+import argparse
+from pathlib import Path
 
-from pipeline.preprocess import resize_long_edge, preprocess_plate_for_ocr
-from pipeline.plate_detect import detect_plate
-from pipeline.ocr_state import ocr_plate
-
-ROOT = r"D:\IPPR_GroupR"
-IMG_DIRS = [
-    os.path.join(ROOT, "images", "motorcycle"),
-    os.path.join(ROOT, "images", "van"),
-]
-
-EXTS = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp", "*.JPG", "*.JPEG", "*.PNG", "*.WEBP", "*.BMP")
-DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
 
 
-def set_tesseract():
-    t = shutil.which("tesseract") or DEFAULT_TESSERACT
-    pytesseract.pytesseract.tesseract_cmd = t
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--images', type=Path, default=Path(__file__).resolve().parents[1] / 'images', help='Image file or directory to process recursively')
+    parser.add_argument('--limit', type=int, help='Process at most this many images')
+    args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error('--limit must be a positive integer')
+    if not args.images.exists():
+        parser.error(f'Image path does not exist: {args.images}')
 
+    paths = [args.images] if args.images.is_file() else sorted(args.images.rglob('*'))
+    paths = [path for path in paths if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS]
+    if args.limit is not None:
+        paths = paths[:args.limit]
+    if not paths:
+        parser.error('No supported images found')
 
-def iter_images(folder):
-    out = []
-    for e in EXTS:
-        out.extend(glob.glob(os.path.join(folder, e)))
-    return sorted(out)
+    # Delay expensive imports so --help works before installing OCR dependencies.
+    from pipeline.plate_detect import detect_plate_info
 
-
-def main():
-    set_tesseract()
-
-    total = 0
-    det_ok = 0
-    ocr_ok = 0
-
-    for d in IMG_DIRS:
-        if not os.path.isdir(d):
+    recognized = errors = 0
+    for path in paths:
+        try:
+            info = detect_plate_info(str(path))
+        except Exception as exc:
+            errors += 1
+            print(f'[ERROR] {path.name}: {exc}')
             continue
+        recognized += bool(info.plate_text)
+        errors += info.mode == 'ERROR'
+        print(f'{path.name} | plate={info.plate_text or "NOT_RECOGNIZED"} | prefix={info.prefix} | state={info.state} | vehicle={info.vehicle_type} | score={info.quality} | {info.debug}')
 
-        print(f"\n=== Folder: {d} ===")
-        for p in iter_images(d):
-            total += 1
-            name = os.path.basename(p)
-
-            bgr = cv2.imread(p)
-            if bgr is None:
-                print(f"[READ_FAIL] {name}")
-                continue
-
-            bgr = resize_long_edge(bgr, 1400)
-
-            warped, bbox, dbg = detect_plate(bgr)
-            if warped is None:
-                print(f"[DETECT_FAIL] {name}")
-                continue
-
-            det_ok += 1
-
-            ph, pw = warped.shape[:2]
-            two_row = (ph / float(pw + 1e-6)) > 0.55
-
-            plate_for_ocr = preprocess_plate_for_ocr(warped)
-            info = ocr_plate(plate_for_ocr, tesseract_path=None, two_row=two_row)
-
-            good = (info.prefix in ("W", "V", "P")) and any(ch.isdigit() for ch in (info.plate_text or ""))
-            if good:
-                ocr_ok += 1
-
-            print(
-                f"{name} | plate={info.plate_text} | prefix={info.prefix} | state={info.state} | "
-                f"vehicle={info.vehicle_type} | quality={getattr(info,'quality',0):.2f}"
-            )
-
-    print(f"\nSUMMARY: total={total}  detected={det_ok}  ok_ocr={ocr_ok}")
+    print(f'\nSUMMARY: images={len(paths)} recognized={recognized} errors={errors}')
+    print('Recognition count is not an accuracy measurement; no ground-truth labels are compared.')
+    return 1 if errors else 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())
